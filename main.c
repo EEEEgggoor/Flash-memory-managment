@@ -106,7 +106,7 @@ int main(int argc, char *argv[]){
 	for(int i = 0; i < 32; i++){
 		printf("PAGE %d: ", i);
 		for(int j = 0; j < 64; j++){
-			if(i==0 && j != 0 && j < 16) {  }
+			if((i==0 && j != 0 && j < 16) || (i == 0 && j == 0)) {  }
 			else { printf(" %d ", buff_table[index_max_gen][i*64 + j]); }
 		}
 		printf("\n");
