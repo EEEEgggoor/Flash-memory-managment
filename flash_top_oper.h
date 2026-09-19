@@ -113,6 +113,8 @@ static inline extent_list_t write_data(uint8_t *data, size_t len) //запись
 				int count = erase_range(exts[e].addr, chunk_len, &sectors_erases, &bytes_per_sectors);
 
 				size_t writt_local = 0;
+
+				
 				while(writt_local < chunk_len){
 					uint32_t page_offset = (exts[e].addr + writt_local) % 256;
 					size_t chunk = 256 - page_offset;

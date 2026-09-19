@@ -13,7 +13,7 @@
 	    pinctrl-names = "default";
 	    pinctrl-0=<&spi3m1_pins &spi3m1_cs0>;
 	    flash: flash@0 {
-		compatible = "rohm,dh2228fv";
+		compatible = "egor,w25q32fv";
 		reg = <0>;
 		spi-max-frequency = <50000000>;
 	    };
