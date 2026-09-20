@@ -61,7 +61,7 @@ static inline void create_inodes_table(){
         size_t total = INODE_TABLE_DATA_BYTES;
         size_t written = 0;
         while(written < total){
-            uint32_t addr = base + INODE_TABLE_HEADER_BYTES + written;
+            uint32_t addr = base + INODE_TABLE_HEADER_BYTES + written;//резервируем сектор под что-то
             uint32_t page_offset = addr % 256;
             size_t chunk = 256 - page_offset;
             if(chunk > total - written) chunk = total - written;

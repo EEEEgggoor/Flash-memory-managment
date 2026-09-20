@@ -69,6 +69,14 @@ int main(int argc, char *argv[]){
 			return 1;
 		}
 
+		size_t chunk = BUF_SIZE;
+		size_t offset = 0;
+		while (offset < total_len) {
+			size_t this_len = (total_len - offset < chunk) ? (total_len - offset) : chunk;
+			read_data((uint32_t)offset, buf + offset, this_len);
+			offset += this_len;
+		}
+		
 
 		printf("WL_TABLE_SECTOR-------------------------------------------------------------------\n");
 		for (int i = 0; i < 8; i++) {
@@ -82,7 +90,7 @@ int main(int argc, char *argv[]){
 		printf("INODE_TABLE-------------------------------------------------------------------\n");
 		for (int i = 8; i < 28; i++) {
 			printf("Sector %2d: ", i);
-			for (int j = 0; j < 50; j++) {
+			for (int j = 0; j < 224; j++) {
 				printf("%02X ", buf[i * SECTOR_SIZE + j]);
 			}
 			printf("\n");
@@ -97,6 +105,7 @@ int main(int argc, char *argv[]){
 			printf("\n");
 		}
 
+		free(buf);
 	}
 	 
     if(!strcmp(argv[1], "--n_WL_table")){
@@ -127,12 +136,8 @@ int main(int argc, char *argv[]){
 		for(int i = 0; i < num_prt; i++){ printf(" 0x%02X ", buff[i]); }
 		printf(" ...\n");
 
-		extent_list_t ext = write_data(buff, num);
-
-
 		write_file(argv[2], buff, num);
 		
-		free(ext.extents);
 	}
 	if(!strcmp(argv[1], "--read")){
 		int num = atoi(argv[3]);
