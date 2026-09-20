@@ -3,7 +3,8 @@
 
 
 #include <stdint.h>
-#define MAX_EXTENTS 32
+#define MAX_EXTENTS 8
+
 
 typedef struct {
     uint32_t addr;

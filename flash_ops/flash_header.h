@@ -25,8 +25,11 @@
 
 #define SECTOR_SIZE 4096
 
+#define BUF_SIZE 4096
+
 
 #define META_SECTORS 8
+#define DATA_START_SECTOR (8 + 4*INODE_TABLE_TOTAL_SECTORS) // = 8 + 20 = 28
 
 
 #define MODE_ERASED   0   // сектор был физически стёрт
@@ -36,6 +39,11 @@
 static int fd;
 uint32_t buff_table[4][2048];
 uint32_t tables[4] = {0x000000, 0x002000, 0x004000, 0x006000};
-uint32_t inodes[4] = {0x008000, 0x00A000, 0x00C000, 0x00E000};
+uint32_t inodes[4] = {
+    0x008000,
+    0x008000 + 5*4096,   // 0x00D000
+    0x008000 + 10*4096,  // 0x012000
+    0x008000 + 15*4096   // 0x017000
+};
 
 #endif
