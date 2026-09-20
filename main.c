@@ -58,12 +58,12 @@ int main(int argc, char *argv[]){
 	
 	int num = atoi(argv[1]);
 
-	flash_init(SPI_PATH, SPI_MODE_0, 8, 20000000);
+	flash_init("/dev/W25Q64FV");
 
 
 
 
-	if(num != -1){
+	if(num != -1 || num != -2){
 
 		uint8_t buff[num];
 		uint8_t buff_flash[num];
@@ -138,7 +138,30 @@ int main(int argc, char *argv[]){
 		
 		free(ext.extents);
 	}
+	if(num == -2){
+		size_t total_len = SECTOR_SIZE * 20; // 81920 байт
+		uint8_t *buf = (uint8_t*)malloc(total_len);
+		if (!buf) {
+			perror("malloc");
+			close(fd);
+			return 1;
+		}
 
+		for (int i = 0; i < 20; i++) {
+			uint32_t addr = (uint32_t)i * SECTOR_SIZE;
+			read_data(addr, buf + (size_t)i * SECTOR_SIZE, SECTOR_SIZE);
+			printf("Сектор %2d (addr 0x%06X) прочитан\n", i, addr);
+		}
+
+		/* Пример: вывод первых 16 байт каждого сектора для проверки */
+		for (int i = 0; i < 20; i++) {
+			printf("Sector %2d: ", i);
+			for (int j = 0; j < 16; j++) {
+				printf("%02X ", buf[i * SECTOR_SIZE + j]);
+			}
+			printf("\n");
+		}		
+	}
 	
 	close(fd);
 	return 0;

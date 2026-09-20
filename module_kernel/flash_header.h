@@ -6,12 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
-#include <linux/spi/spidev.h>
 #include <sys/ioctl.h>
 #include <time.h>
 #include <stdint.h>
 
-#define SPI_PATH "/dev/spidev3.0"
+#define DEV_PATH "/dev/W25Q64FV"
 
 #define CHECK_FLASH 0x9F
 
@@ -22,6 +21,7 @@
 #define READ_STATUS 0x05
 #define CHIP_ERASE 0xC7
 
+#define SECTOR_SIZE 4096
 
 
 #define META_SECTORS 8

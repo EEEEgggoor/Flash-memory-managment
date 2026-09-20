@@ -16,7 +16,7 @@
 #include "w25q_ioctl.h"
 
 
-#define DEVICE_NAME "W25Q32FV"
+#define DEVICE_NAME "W25Q64FV"
 #define BUF_SIZE 4096
 
 #define CHECK_FLASH 0x9F
@@ -27,6 +27,11 @@
 #define READ_DATA 0x03
 #define READ_STATUS 0x05
 #define CHIP_ERASE 0xC7
+#define WRITE_STATUS_REG 0x01
+
+
+#define W25Q_EXPECTED_MFR_ID   0xEF
+#define W25Q_EXPECTED_MEM_TYPE 0x40
 
 
 struct w25q {
@@ -80,9 +85,6 @@ static ssize_t dev_read(struct file *file, char __user *user_buf,
     size_t len_data;
     int ret;
 
-    if (*off > 0)
-        return 0;
-
     if (priv->result_ready) {
         len_data = priv->data_size;
         priv->result_ready = false;
@@ -103,7 +105,9 @@ static ssize_t dev_read(struct file *file, char __user *user_buf,
     if (copy_to_user(user_buf, priv->kernel_buffer, len_data))
         return -EFAULT;
 
-    *off += len_data;
+
+        
+    *off = 0;
     return len_data;
 }
 
@@ -200,6 +204,31 @@ static ssize_t dev_write(struct file *file, const char __user *user_buf,
         break;
     }
 
+    case READ_STATUS: {
+        u8 status;
+        priv->result_ready = true;
+
+        ret = w25q_cmd(priv, READ_STATUS, 0, false, NULL, 0, &status, 1);
+        if (ret < 0) {
+            priv->result_ready = false;
+            break;
+        }
+
+        priv->kernel_buffer[0] = status;
+        priv->data_size = 1;
+        break;
+    }
+    case WRITE_STATUS_REG: {
+        u8 new_status = 0x00;
+        priv->result_ready = false;
+
+        ret = w25q_cmd(priv, WRITE_ENABLE, 0, false, NULL, 0, NULL, 0);
+        if (ret < 0)
+            break;
+
+        ret = w25q_cmd(priv, WRITE_STATUS_REG, 0, false, &new_status, 1, NULL, 0);
+        break;
+    }
     default:
         return -EINVAL;
     }
@@ -247,6 +276,8 @@ static const struct file_operations fops = {
 static int w25q_probe(struct spi_device *spi)
 {
     struct w25q *priv;
+    u8 id[3];
+    int ret;
 
     priv = devm_kzalloc(&spi->dev, sizeof(*priv), GFP_KERNEL);
     if(!priv) { return -ENOMEM; }
@@ -256,7 +287,7 @@ static int w25q_probe(struct spi_device *spi)
     mutex_init(&priv->lock);
     spi_set_drvdata(spi, priv);
 
-    spi->mode = SPI_MODE_0;
+    spi->mode = SPI_MODE_1;
     spi->bits_per_word = 8;
     if(spi_setup(spi) < 0){
         dev_err(&spi->dev, "spi_setup fail\n");
@@ -265,6 +296,23 @@ static int w25q_probe(struct spi_device *spi)
 
     priv->kernel_buffer = devm_kmalloc(&spi->dev, BUF_SIZE, GFP_KERNEL);
     if(!priv->kernel_buffer) { return -ENOMEM; }
+
+    
+    ret = w25q_cmd(priv, CHECK_FLASH, 0, false, NULL, 0, id, sizeof(id));
+    if (ret < 0) {
+        dev_err(&spi->dev, "CHECK_FLASH failed: %d\n", ret);
+        return ret;
+    }
+
+    dev_info(&spi->dev, "JEDEC ID: mfr=0x%02x type=0x%02x capacity=0x%02x\n",
+              id[0], id[1], id[2]);
+
+    if (id[0] != W25Q_EXPECTED_MFR_ID || id[1] != W25Q_EXPECTED_MEM_TYPE) {
+        dev_err(&spi->dev, "unexpected flash chip (mfr=0x%02x type=0x%02x), aborting probe\n",
+                 id[0], id[1]);
+        return -ENODEV;
+    }
+
 
     int ret_alloc_chrdev = alloc_chrdev_region(&priv->dev_num, 0, 1, DEVICE_NAME);
 
@@ -275,7 +323,7 @@ static int w25q_probe(struct spi_device *spi)
     cdev_init(&priv->flash_cdev, &fops);
     priv->flash_cdev.owner = THIS_MODULE;
 
-    int ret = cdev_add(&priv->flash_cdev, priv->dev_num, 1);
+    ret = cdev_add(&priv->flash_cdev, priv->dev_num, 1);
     if (ret < 0) {
         unregister_chrdev_region(priv->dev_num, 1);
         return ret;
@@ -287,6 +335,7 @@ static int w25q_probe(struct spi_device *spi)
         unregister_chrdev_region(priv->dev_num, 1);
         return PTR_ERR(priv->flash_device);
     }
+
 
     dev_info(&spi->dev, "probed, major=%d minor=%d\n",
               MAJOR(priv->dev_num), MINOR(priv->dev_num));
