@@ -40,6 +40,8 @@ struct w25q {
     struct mutex lock;
     u32 pending_addr;
     u32 pending_len;
+
+    bool result_ready;
 };
 
 
@@ -64,8 +66,8 @@ static int dev_open(struct inode *inode, struct file *file)
 
 static int dev_release(struct inode *inode, struct file *file)
 {
-    struct w25q *priv = container_of(inode->i_cdev, struct w25q, flash_cdev);
-    mutex_unlock(&(priv->lock));
+    struct w25q *priv = file->private_data;
+    mutex_unlock(&priv->lock);
     printk(KERN_INFO "w25q: closed\n");
     return 0;
 }
@@ -75,27 +77,35 @@ static ssize_t dev_read(struct file *file, char __user *user_buf,
                         size_t len, loff_t *off)
 {
     struct w25q *priv = file->private_data;
-    u32 len_data = priv->pending_len;
-    u8 id[len_data];
+    size_t len_data;
     int ret;
 
     if (*off > 0)
         return 0;
 
+    if (priv->result_ready) {
+        len_data = priv->data_size;
+        priv->result_ready = false;
+    } else {
+        len_data = priv->pending_len;
+        if (len_data == 0 || len_data > BUF_SIZE)
+            return -EINVAL;
+
+        ret = w25q_cmd(priv, READ_DATA, priv->pending_addr, true,
+                        NULL, 0, priv->kernel_buffer, len_data);
+        if (ret < 0)
+            return ret;
+    }
+
     if (len < len_data)
         return -EINVAL;
 
-    ret = w25q_cmd(priv, READ_DATA, priv->pending_addr, true, NULL, 0, id, len_data);
-    if (ret < 0)
-        return ret;
-
-    if (copy_to_user(user_buf, id, len_data))
+    if (copy_to_user(user_buf, priv->kernel_buffer, len_data))
         return -EFAULT;
 
     *off += len_data;
     return len_data;
 }
-
 
 static ssize_t dev_write(struct file *file, const char __user *user_buf,
                         size_t len, loff_t *off)
@@ -114,17 +124,26 @@ static ssize_t dev_write(struct file *file, const char __user *user_buf,
 
     switch (opcode) {
     case WRITE_ENABLE:
+        priv->result_ready = false;
+
         ret = w25q_cmd(priv, WRITE_ENABLE, 0, false, NULL, 0, NULL, 0);
+        priv->result_ready = false;
+
         break;
 
     case CHIP_ERASE:
+        priv->result_ready = false;
+
         ret = w25q_cmd(priv, WRITE_ENABLE, 0, false, NULL, 0, NULL, 0);
         if (ret < 0)
             break;
         ret = w25q_cmd(priv, CHIP_ERASE, 0, false, NULL, 0, NULL, 0);
+
         break;
 
     case SECTOR_ERASE: {
+        priv->result_ready = false;
+
         u32 addr;
 
         if (len < 1 + 3)
@@ -138,10 +157,14 @@ static ssize_t dev_write(struct file *file, const char __user *user_buf,
         if (ret < 0)
             break;
         ret = w25q_cmd(priv, SECTOR_ERASE, addr, true, NULL, 0, NULL, 0);
+        priv->result_ready = false;
+
         break;
     }
 
     case PAGE_PROGRAM: {
+        priv->result_ready = false;
+
         u32 addr;
         const u8 *payload = priv->kernel_buffer + 4;
         size_t payload_len = len - 4;
@@ -158,6 +181,22 @@ static ssize_t dev_write(struct file *file, const char __user *user_buf,
             break;
         ret = w25q_cmd(priv, PAGE_PROGRAM, addr, true,
                         payload, payload_len, NULL, 0);
+        priv->result_ready = false;
+
+        break;
+    }
+
+    case CHECK_FLASH: {
+        priv->result_ready = true;
+
+        u8 id[3];
+        ret = w25q_cmd(priv, CHECK_FLASH, 0, false, NULL, 0, id, 3);
+        if (ret < 0)
+            break;
+
+        memcpy(priv->kernel_buffer, id, sizeof(id));
+        priv->data_size = sizeof(id);
+
         break;
     }
 
@@ -265,6 +304,9 @@ static void w25q_remove(struct spi_device *spi)
     device_destroy(priv->flash_class, priv->dev_num);
     cdev_del(&priv->flash_cdev);
     unregister_chrdev_region(priv->dev_num, 1);
+
+
+        dev_info(&spi->dev, "w25q removed");
 }
 
 static const struct of_device_id w25q_of_match[] = {
