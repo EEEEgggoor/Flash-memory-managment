@@ -69,26 +69,20 @@ int main(int argc, char *argv[]){
 			return 1;
 		}
 
-		for (int i = 0; i < 38; i++) {
-			uint32_t addr = (uint32_t)i * SECTOR_SIZE;
-			read_data(addr, buf + (size_t)i * SECTOR_SIZE, SECTOR_SIZE);
-			printf("Сектор %2d (addr 0x%06X) прочитан\n", i, addr);
-		}
-
 
 		printf("WL_TABLE_SECTOR-------------------------------------------------------------------\n");
-		for (int i = 0; i < 4; i++) {
+		for (int i = 0; i < 8; i++) {
 			printf("Sector %2d: ", i);
-			for (int j = 0; j < 16; j++) {
+			for (int j = 0; j < 50; j++) {
 				printf("%02X ", buf[i * SECTOR_SIZE + j]);
 			}
 			printf("\n");
 		}
 
 		printf("INODE_TABLE-------------------------------------------------------------------\n");
-		for (int i = 4; i < 28; i++) {
+		for (int i = 8; i < 28; i++) {
 			printf("Sector %2d: ", i);
-			for (int j = 0; j < 16; j++) {
+			for (int j = 0; j < 50; j++) {
 				printf("%02X ", buf[i * SECTOR_SIZE + j]);
 			}
 			printf("\n");
@@ -97,7 +91,7 @@ int main(int argc, char *argv[]){
 		printf("DATA-------------------------------------------------------------------\n");
 		for (int i = 28; i < 38; i++) {
 			printf("Sector %2d: ", i);
-			for (int j = 0; j < 16; j++) {
+			for (int j = 0; j < 50; j++) {
 				printf("%02X ", buf[i * SECTOR_SIZE + j]);
 			}
 			printf("\n");
@@ -120,7 +114,7 @@ int main(int argc, char *argv[]){
 
 	if(!strcmp(argv[1], "--write")){
 
-		int num = atoi(argv[2]);
+		int num = atoi(argv[3]);
 
 		uint8_t buff[num];
 		uint8_t buff_flash[num];
@@ -136,12 +130,12 @@ int main(int argc, char *argv[]){
 		extent_list_t ext = write_data(buff, num);
 
 
-		write_file("test_file", buff, num);
+		write_file(argv[2], buff, num);
 		
 		free(ext.extents);
 	}
 	if(!strcmp(argv[1], "--read")){
-		int num = atoi(argv[2]);
+		int num = atoi(argv[3]);
 		int num_prt;
 
 
@@ -149,7 +143,7 @@ int main(int argc, char *argv[]){
 
 		printf("read from flash: ");
 
-		read_file("test_file", buff_flash, num);
+		read_file(argv[2], buff_flash, num);
 
 		if(num > 50) { num_prt = 15; }
 		else{ num_prt = num; }
