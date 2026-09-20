@@ -7,49 +7,10 @@
 #include <sys/ioctl.h>
 #include <time.h>
 
-#include "flash_top_oper.h"
+#include "file_system/_init.h"
 
 
 uint8_t r_hex(){ return (uint8_t)(rand() & 0xFF); }
-
-void init_perez(uint32_t *buff){
-
-	int k = 0;
-		
-	buff[0] = 0;
-	
-	for(int i = 1; i < 2048; i++){ buff[i] = 0; }
-
-}
-
-void create_tables(){
-
-
-	uint32_t buff_table1[2048];
-	init_perez(buff_table1);
-
-
-	for(int i = 0; i < 4; i++){
-		sector_erase(tables[i]); wait_busy();
-		sector_erase(tables[i] + 4096); wait_busy();
-		for(int j = 0; j < 2048; j++){
-			raw_write_uint32(tables[i] + j * 0x000004, buff_table1[j]);
-		}
-	}
-
-
-
-	for(int j = 0; j < 4; j++){
-		for(int i = 0; i < 2048; i++) {
-			buff_table[j][i] = read_uint32(tables[j] + 0x000004 * i);
-		}
-		wait_busy();
-	}
-	
-
-}
-
-
 
 
 int main(int argc, char *argv[]){
@@ -60,10 +21,23 @@ int main(int argc, char *argv[]){
 
 	flash_init("/dev/W25Q64FV");
 
+	if(num == -123){
+		printf("sizeof(file_inode_t) = %zu\n", sizeof(file_inode_t));
+		printf("total inode table size = %zu bytes = %.2f sectors\n",
+			sizeof(file_inode_t) * MAX_FILES,
+			(double)(sizeof(file_inode_t) * MAX_FILES) / 4096.0);
+	}
+	
+    if(num == -3){
+        create_tables_wear_levering();
+        printf("Tables initialized\n");
+        close(fd);
+        return 0;
+    }
 
 
 
-	if(num != -1 || num != -2){
+	if(num > 0){
 
 		uint8_t buff[num];
 		uint8_t buff_flash[num];

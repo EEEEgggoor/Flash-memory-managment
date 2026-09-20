@@ -1,56 +1,4 @@
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
-#include <linux/cdev.h>
-#include <linux/uaccess.h>
-#include <linux/slab.h>
-#include <linux/device.h>
-#include <linux/mutex.h>
-#include <linux/spi/spi.h>
-#include <linux/of.h>
-
-//SPI
-#include <linux/spi/spi.h>
-
-#include "w25q_ioctl.h"
-
-
-#define DEVICE_NAME "W25Q64FV"
-#define BUF_SIZE 4096
-
-#define CHECK_FLASH 0x9F
-
-#define WRITE_ENABLE 0x06
-#define PAGE_PROGRAM 0x02
-#define SECTOR_ERASE 0x20
-#define READ_DATA 0x03
-#define READ_STATUS 0x05
-#define CHIP_ERASE 0xC7
-#define WRITE_STATUS_REG 0x01
-
-
-#define W25Q_EXPECTED_MFR_ID   0xEF
-#define W25Q_EXPECTED_MEM_TYPE 0x40
-
-
-struct w25q {
-    struct spi_device *spi;
-    dev_t dev_num;
-    struct cdev flash_cdev;
-    struct class *flash_class;
-    struct device *flash_device;
-    char *kernel_buffer;
-    size_t data_size;
-    struct mutex lock;
-    u32 pending_addr;
-    u32 pending_len;
-
-    bool result_ready;
-};
-
-
-struct class *w25q_class;
+#include "w25q_cdev.h"
 
 static int w25q_cmd(struct w25q *priv, u8 opcode, u32 addr, bool use_addr,
                      const u8 *tx_data, size_t tx_len,
@@ -171,9 +119,9 @@ static ssize_t dev_write(struct file *file, const char __user *user_buf,
 
         u32 addr;
         const u8 *payload = priv->kernel_buffer + 4;
-        size_t payload_len = len - 4;
+        size_t payload_len = to_copy - 4;
 
-        if (len < 1 + 3 + 1)
+        if (to_copy < 1 + 3 + 1)
             return -EINVAL;
 
         addr = (priv->kernel_buffer[1] << 16) |
@@ -287,8 +235,9 @@ static int w25q_probe(struct spi_device *spi)
     mutex_init(&priv->lock);
     spi_set_drvdata(spi, priv);
 
-    spi->mode = SPI_MODE_1;
+    spi->mode = SPI_MODE_0;
     spi->bits_per_word = 8;
+
     if(spi_setup(spi) < 0){
         dev_err(&spi->dev, "spi_setup fail\n");
         return -EIO;
@@ -411,43 +360,69 @@ static int w25q_cmd(struct w25q *priv, u8 opcode, u32 addr, bool use_addr,
                      const u8 *tx_data, size_t tx_len,
                      u8 *rx_data, size_t rx_len)
 {
-    struct spi_transfer xfer[2] = {0};
+    struct spi_transfer xfer = {0};
     struct spi_message msg;
-    u8 cmd[4];              
-
+    u8 cmd_hdr[4];
     int cmd_len;
-    int n_xfer = 0;
+    int ret;
 
-    cmd[0] = opcode;
+    cmd_hdr[0] = opcode;
     if (use_addr) {
-        cmd[1] = (addr >> 16) & 0xFF;
-        cmd[2] = (addr >> 8) & 0xFF;
-        cmd[3] = addr & 0xFF;
+        cmd_hdr[1] = (addr >> 16) & 0xFF;
+        cmd_hdr[2] = (addr >> 8) & 0xFF;
+        cmd_hdr[3] = addr & 0xFF;
         cmd_len = 4;
     } else {
         cmd_len = 1;
     }
 
-    xfer[n_xfer].tx_buf = cmd;
-    xfer[n_xfer].len = cmd_len;
-    n_xfer++;
-
     if (tx_data && tx_len) {
-        xfer[n_xfer].tx_buf = tx_data;
-        xfer[n_xfer].len = tx_len;
-        n_xfer++;
-    } else if (rx_data && rx_len) {
-        xfer[n_xfer].rx_buf = rx_data;
-        xfer[n_xfer].len = rx_len;
-        n_xfer++;
+        /* Собираем ОДИН непрерывный буфер: заголовок + payload */
+        size_t total_len = cmd_len + tx_len;
+        u8 *combined = kmalloc(total_len, GFP_KERNEL);
+        if (!combined)
+            return -ENOMEM;
+
+        memcpy(combined, cmd_hdr, cmd_len);
+        memcpy(combined + cmd_len, tx_data, tx_len);
+
+        xfer.tx_buf = combined;
+        xfer.len = total_len;
+
+        spi_message_init(&msg);
+        spi_message_add_tail(&xfer, &msg);
+        ret = spi_sync(priv->spi, &msg);
+
+        kfree(combined);
+        return ret;
     }
+    else if (rx_data && rx_len) {
+        /* Для чтения нужен полудуплексный обмен: сначала команда, потом чтение.
+           Здесь оставляем два transfer'а, т.к. это стандартный и хорошо
+           поддерживаемый паттерн (write-then-read), в отличие от
+           двух последовательных TX-буферов подряд. */
+        struct spi_transfer xfers[2] = {0};
 
-    spi_message_init(&msg);
-    spi_message_add_tail(&xfer[0], &msg);
-    if (n_xfer > 1)
-        spi_message_add_tail(&xfer[1], &msg);
+        xfers[0].tx_buf = cmd_hdr;
+        xfers[0].len = cmd_len;
 
-    return spi_sync(priv->spi, &msg);
+        xfers[1].rx_buf = rx_data;
+        xfers[1].len = rx_len;
+
+        spi_message_init(&msg);
+        spi_message_add_tail(&xfers[0], &msg);
+        spi_message_add_tail(&xfers[1], &msg);
+        return spi_sync(priv->spi, &msg);
+    }
+    else {
+        /* Только команда, без данных */
+        xfer.tx_buf = cmd_hdr;
+        xfer.len = cmd_len;
+
+        spi_message_init(&msg);
+        spi_message_add_tail(&xfer, &msg);
+        return spi_sync(priv->spi, &msg);
+    }
 }
 
 
