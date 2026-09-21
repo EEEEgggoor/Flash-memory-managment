@@ -52,9 +52,7 @@ static inline int read_status(void){
 }
 
 static inline void write_enable(void){
-    /* Обычно не требуется вызывать вручную — драйвер сам делает
-       WRITE_ENABLE перед CHIP_ERASE / SECTOR_ERASE / PAGE_PROGRAM.
-       Оставлено на случай, если нужно выставить WEL отдельно. */
+    
     uint8_t tx[1] = {WRITE_ENABLE};
     if (write(fd, tx, 1) != 1) { perror("write WRITE_ENABLE"); }
 }
