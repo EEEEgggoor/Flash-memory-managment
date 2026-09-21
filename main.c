@@ -8,6 +8,7 @@
 #include <time.h>
 
 #include "file_system/FS_fops.h"
+#include "run_fs_tests.h"
 
 
 uint8_t r_hex(){ return (uint8_t)(rand() & 0xFF); }
@@ -17,15 +18,19 @@ int main(int argc, char *argv[]){
 
 	srand(time(NULL));
 	
-
 	flash_init("/dev/W25Q64FV");
+
+	if(!strcmp(argv[1], "--inode")){
+		garbage_collection(); 
+	}
+
 
 	if(!strcmp(argv[1], "--info")){
 		printf("sizeof(file_inode_t) = %zu\n", sizeof(file_inode_t));
 		printf("total inode table size = %zu bytes = %.2f sectors\n",
 			sizeof(file_inode_t) * MAX_FILES,
 			(double)(sizeof(file_inode_t) * MAX_FILES) / 4096.0);
-
+ 
 		printf("WL_TABLE_PAGE-------------------------------------------------------------------\n");
 
 		for(int k = 0; k < 4; k ++){
@@ -39,7 +44,6 @@ int main(int argc, char *argv[]){
 		for(int i = 0; i < 4; i++){
 			if(max_gen < buff_table[i][0]) { max_gen = buff_table[i][0]; index_max_gen = i; }
 		}
-
 
 		for(int i = 0; i < 1; i++){
 			printf("GEN %d: ", max_gen);
@@ -96,6 +100,7 @@ int main(int argc, char *argv[]){
 			printf("\n");
 		}
 
+
 		printf("DATA-------------------------------------------------------------------\n");
 		for (int i = 28; i < 38; i++) {
 			printf("Sector %2d: ", i);
@@ -142,8 +147,6 @@ int main(int argc, char *argv[]){
 	if(!strcmp(argv[1], "--read")){
 		int num = atoi(argv[3]);
 		int num_prt;
-
-
 		uint8_t buff_flash[num];
 
 		printf("read from flash: ");
@@ -154,8 +157,21 @@ int main(int argc, char *argv[]){
 		else{ num_prt = num; }
 		for(int i = 0; i < num_prt; i++){ printf(" 0x%02X ", buff_flash[i]); }
 		printf(" ...\n");
+	}  
+ 
+	if(!strcmp(argv[1], "--del")){
+		int num_prt;
+
+		printf("delete %s ...\n", argv[2]);
+
+		int d = delete_file(argv[2]);
+		if(d == 0) { printf(" finish delete %s\n", argv[2]); } else{ printf("error delete %s\n", argv[2]); }
 	}
-	
+
+	if(!strcmp(argv[1], "--test")){
+		run_fs_tests();
+	}
+
 	close(fd);
 	return 0;
 }

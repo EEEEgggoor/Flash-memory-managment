@@ -125,7 +125,7 @@ static inline void inc_note_sectors(uint32_t* addrs, uint32_t* lens, int mode, s
 
 	for(int j = 0; j < count_sectors_erases; j++){
 		uint32_t addr = addrs[j];
-		uint32_t sector_number = addr >> 12;
+		uint32_t sector_number = NUMBER_SECTOR(addr);
 		if(mode == 0){
 			buff[sector_number * 2] = lens[j];
 			buff[sector_number * 2 + 1] += 1;
@@ -144,7 +144,7 @@ static inline void inc_note_sectors(uint32_t* addrs, uint32_t* lens, int mode, s
 	free(buff);
 }
 
-static inline extent_list_t write_data(uint8_t *data, size_t len) //запись в самую "свежую" ячейку
+static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead_sectors) //запись в самую "свежую" ячейку
 {
 	uint32_t buff_gen[4];
 	uint32_t addr_sector;
@@ -172,9 +172,11 @@ static inline extent_list_t write_data(uint8_t *data, size_t len) //запись
 		if(4096 - buff[i] >= len){
 			flag = 1; //найден сектор, в который можно дозаписать данные
 			if(buff[i+1] < min_sector){
-				min_sector = buff[i+1];
-				idx_min_sector = i;
-				min_sector_with_free_data = buff[i];
+				if(dead_sectors[i / 2] == 0){
+					min_sector = buff[i+1];
+					idx_min_sector = i;
+					min_sector_with_free_data = buff[i];
+				}
 			}
 		}
 	}
@@ -189,8 +191,11 @@ static inline extent_list_t write_data(uint8_t *data, size_t len) //запись
 			for(int i = DATA_START_SECTOR*2; i < 2048; i += 2){
 				uint32_t count = buff[i+1];
 				if(count < min_sector){
-					min_sector = count;
-					idx_min_sector = i;
+					if(dead_sectors[i / 2] == 0){
+						min_sector = count;
+						idx_min_sector = i;
+					}
+
 				}
 			}
 

@@ -77,8 +77,6 @@ static inline int sector_erase(uint32_t addr){
         addr & 0xFF
     };
 
-    /* write_enable() вызывать не нужно — драйвер делает это сам
-       внутри case SECTOR_ERASE в dev_write() */
     if (write(fd, tx, sizeof(tx)) != (ssize_t)sizeof(tx)) {
         perror("write SECTOR_ERASE");
         return -1;

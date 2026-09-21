@@ -40,5 +40,10 @@ static int fd;
 uint32_t buff_table[4][2048];
 uint32_t tables[4] = {0x000000, 0x002000, 0x004000, 0x006000};
 uint32_t inodes[4] = {0x008000, 0x00D000, 0x012000, 0x017000};
+uint32_t dead_sectors[1024] = {0};
+
+
+static inline uint32_t NUMBER_SECTOR(uint32_t addr){ return addr >> 12; }
+
 
 #endif

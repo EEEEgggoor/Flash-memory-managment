@@ -8,6 +8,8 @@
 #define INODE_TABLE_DATA_BYTES (MAX_FILES * sizeof(file_inode_t)) // 14336
 #define INODE_TABLE_TOTAL_SECTORS ((INODE_TABLE_HEADER_BYTES + INODE_TABLE_DATA_BYTES + 4095) / 4096) // 3 сектора
 
+
+
 typedef struct
 {
     char name[32];
@@ -18,6 +20,9 @@ typedef struct
     uint8_t flags;
 
 } file_inode_t;
+
+
+
 
 
 
