@@ -180,6 +180,7 @@ static inline int write_file(char *file_name, uint8_t *data, size_t len){
 
 static inline int read_file(char* file_name, uint8_t *out_buf, size_t max_len){
 	file_inode_t table_inode[MAX_FILES];
+	int slote = -1;
 
 	read_inode_table(table_inode);
 
@@ -199,5 +200,22 @@ static inline int read_file(char* file_name, uint8_t *out_buf, size_t max_len){
 	}
 	return -1;
 }
+
+static inline int delete_file(char* file_name){
+	file_inode_t table_inode[MAX_FILES];
+
+	read_inode_table(table_inode);
+	for(int i = 0; i < MAX_FILES; i++){
+		if(!strcmp(table_inode[i].name, file_name) && table_inode[i].flags == 1){
+			table_inode[i].flags = 0;
+			write_inode_table(table_inode);
+			return 0;
+		}
+	}
+	return -1;
+}
+
+
+
 
 #endif //FS_FOPS
