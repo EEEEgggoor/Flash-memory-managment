@@ -7,7 +7,7 @@
 #include <sys/ioctl.h>
 #include <time.h>
 
-#include "file_system/FS_fops.h"
+#include "file_system/load_export_f.h"
 #include "run_fs_tests.h"
 
 
@@ -113,16 +113,10 @@ int main(int argc, char *argv[]){
 		free(buf);
 	}
 	 
-    if(!strcmp(argv[1], "--n_WL_table")){
-        create_tables_wear_levering();
-		create_inodes_table();
-        printf("Tables init\n");
-        close(fd);
-        return 0;
-    }
-
 	if(!strcmp(argv[1], "--reset_flash")){
 		chip_erase();
+        create_tables_wear_levering();
+		create_inodes_table();
 
 	}
 
@@ -171,6 +165,21 @@ int main(int argc, char *argv[]){
 	if(!strcmp(argv[1], "--test")){
 		run_fs_tests();
 	}
+
+	// Загрузить из системы на флешку (Пример: ./main --import my_image.jpg)
+    if(!strcmp(argv[1], "--import")){
+
+        import_from_linux(argv[2]);
+        close(fd);
+        return 0;
+    }
+
+    // Выгрузить с флешки в систему (Пример: ./main --export my_image.jpg)
+    if(!strcmp(argv[1], "--export")){
+        export_to_linux(argv[2]);
+        close(fd);
+        return 0;
+    }
 
 	close(fd);
 	return 0;
