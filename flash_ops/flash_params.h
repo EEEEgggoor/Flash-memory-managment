@@ -9,7 +9,9 @@
  * При смене чипа достаточно поменять эту константу — вся остальная
  * геометрия (число секторов, размер WL/inode таблиц, DATA_START_SECTOR
  * и т.д.) пересчитывается автоматически из неё. */
-#define FLASH_CHIP_CAPACITY_BYTES  (8 * 1024 * 1024)
+#define FLASH_CHIP_SIZE_MB         8
+ 
+#define FLASH_CHIP_CAPACITY_BYTES  (FLASH_CHIP_SIZE_MB * 1024 * 1024)
 
 #define SECTOR_SIZE                4096
 #define PAGE_SIZE                  256    /* размер страницы для PAGE_PROGRAM */

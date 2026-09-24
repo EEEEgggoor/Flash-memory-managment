@@ -23,7 +23,7 @@ int main(int argc, char *argv[]){
 	if(!strcmp(argv[1], "--inode")){
 		garbage_collection(); 
 	}
-
+	
 
 	if(!strcmp(argv[1], "--info")){
 		printf("sizeof(file_inode_t) = %zu\n", sizeof(file_inode_t));

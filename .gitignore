@@ -1,3 +1,4 @@
 .vscode
 *.dts
 *.dtbo
+/server_visual
