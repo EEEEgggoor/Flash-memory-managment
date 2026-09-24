@@ -29,19 +29,19 @@ int main(int argc, char *argv[]){
 		printf("sizeof(file_inode_t) = %zu\n", sizeof(file_inode_t));
 		printf("total inode table size = %zu bytes = %.2f sectors\n",
 			sizeof(file_inode_t) * MAX_FILES,
-			(double)(sizeof(file_inode_t) * MAX_FILES) / 4096.0);
+			(double)(sizeof(file_inode_t) * MAX_FILES) / SECTOR_SIZE);
  
 		printf("WL_TABLE_PAGE-------------------------------------------------------------------\n");
 
-		for(int k = 0; k < 4; k ++){
-			for(int i = 0; i < 2048; i++){
+		for(int k = 0; k < WL_TABLE_SLOTS; k ++){
+			for(int i = 0; i < WL_TABLE_ENTRIES; i++){
 				buff_table[k][i] = read_uint32(tables[k] + 4*i);
 			}
 		}
 
 		uint32_t max_gen = 0;
 		uint32_t index_max_gen = 0;
-		for(int i = 0; i < 4; i++){
+		for(int i = 0; i < WL_TABLE_SLOTS; i++){
 			if(max_gen < buff_table[i][0]) { max_gen = buff_table[i][0]; index_max_gen = i; }
 		}
 
@@ -53,19 +53,27 @@ int main(int argc, char *argv[]){
 		}
 		printf("\n");
 
-		for(int i = 0; i < 32; i++){
-			printf("PAGE %d: ", i);
-			for(int j = 0; j < 64; j++){
-				if((i==0 && j != 0 && j < 16) || (i == 0 && j == 0)) {  }
-				else { printf(" %d ", buff_table[index_max_gen][i*64 + j]); }
+		/* WL_TABLE_ENTRIES записей выводим построчно по WL_DISPLAY_COLS штук */
+		{
+			const int WL_DISPLAY_COLS = 64;
+			int wl_display_rows = WL_TABLE_ENTRIES / WL_DISPLAY_COLS;
+			for(int i = 0; i < wl_display_rows; i++){
+				printf("PAGE %d: ", i);
+				for(int j = 0; j < WL_DISPLAY_COLS; j++){
+					if((i==0 && j != 0 && j < 16) || (i == 0 && j == 0)) {  }
+					else { printf(" %d ", buff_table[index_max_gen][i*WL_DISPLAY_COLS + j]); }
+				}
+				printf("\n");
 			}
-			printf("\n");
 		}
 
 
 		printf("\n");
 
-		size_t total_len = SECTOR_SIZE * 38;
+		/* Показываем всю мета-область (WL + inode таблицы) плюс небольшой
+		   кусок начала области данных для превью. */
+		size_t preview_data_sectors = 10;
+		size_t total_len = (size_t)(DATA_START_SECTOR + preview_data_sectors) * SECTOR_SIZE;
 		uint8_t *buf = (uint8_t*)malloc(total_len);
 		if (!buf) {
 			perror("malloc");
@@ -83,7 +91,7 @@ int main(int argc, char *argv[]){
 		
 
 		printf("WL_TABLE_SECTOR-------------------------------------------------------------------\n");
-		for (int i = 0; i < 8; i++) {
+		for (int i = 0; i < META_SECTORS; i++) {
 			printf("Sector %2d: ", i);
 			for (int j = 0; j < 50; j++) {
 				printf("%02X ", buf[i * SECTOR_SIZE + j]);
@@ -92,7 +100,7 @@ int main(int argc, char *argv[]){
 		}
 
 		printf("INODE_TABLE-------------------------------------------------------------------\n");
-		for (int i = 8; i < 28; i++) {
+		for (int i = META_SECTORS; i < DATA_START_SECTOR; i++) {
 			printf("Sector %2d: ", i);
 			for (int j = 0; j < 224; j++) {
 				printf("%02X ", buf[i * SECTOR_SIZE + j]);
@@ -102,7 +110,7 @@ int main(int argc, char *argv[]){
 
 
 		printf("DATA-------------------------------------------------------------------\n");
-		for (int i = 28; i < 38; i++) {
+		for (int i = DATA_START_SECTOR; i < DATA_START_SECTOR + (int)preview_data_sectors; i++) {
 			printf("Sector %2d: ", i);
 			for (int j = 0; j < 50; j++) {
 				printf("%02X ", buf[i * SECTOR_SIZE + j]);

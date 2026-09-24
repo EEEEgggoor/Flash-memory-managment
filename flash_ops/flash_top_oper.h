@@ -13,7 +13,7 @@ static inline void init_perez(uint32_t *buff){
 
 	buff[0] = 0;
 	
-	for(int i = 1; i < 2048; i++){ buff[i] = 0; }
+	for(int i = 1; i < WL_TABLE_ENTRIES; i++){ buff[i] = 0; }
 
 }
 
@@ -36,7 +36,7 @@ static inline int fragmentation_file(uint32_t *buff, size_t sectors_needed,
 	size_t collected = 0;
 	int n = 0;
 
-	for(int i = DATA_START_SECTOR*2; i < 2048; i += 2){
+	for(int i = DATA_START_SECTOR*WL_ENTRIES_PER_SECTOR; i < WL_TABLE_ENTRIES; i += WL_ENTRIES_PER_SECTOR){
 		if(buff[i] == 0){
 			if(run_start == -1) { run_start = i; }
 			run_len++;
@@ -45,7 +45,7 @@ static inline int fragmentation_file(uint32_t *buff, size_t sectors_needed,
 				if(n >= max_extents) { return 0; }
 				size_t take = run_len;
 				if(collected + take > sectors_needed) take = sectors_needed - collected;
-				out[n].addr = (run_start/2) << 12;
+				out[n].addr = (run_start/WL_ENTRIES_PER_SECTOR) * SECTOR_SIZE;
 				out[n].len  = (uint32_t)take;
 				collected += take;
 				n++;
@@ -60,7 +60,7 @@ static inline int fragmentation_file(uint32_t *buff, size_t sectors_needed,
 	if(n < max_extents && collected < sectors_needed && run_len > 0){
 		size_t take = run_len;
 		if(collected + take > sectors_needed) take = sectors_needed - collected;
-		out[n].addr = (run_start/2) << 12;
+		out[n].addr = (run_start/WL_ENTRIES_PER_SECTOR) * SECTOR_SIZE;
 		out[n].len  = (uint32_t)take;
 		collected += take;
 		n++;
@@ -73,10 +73,10 @@ static inline int fragmentation_file(uint32_t *buff, size_t sectors_needed,
 
 static inline int erase_range(uint32_t addr, size_t len, uint32_t** sectors_erases, uint32_t** bytes_per_sectors){
 
-	uint32_t sector_start = addr & ~(4095);
-	uint32_t sector_end = (addr+len-1) & ~(4095);
+	uint32_t sector_start = addr & ~(SECTOR_SIZE - 1);
+	uint32_t sector_end = (addr+len-1) & ~(SECTOR_SIZE - 1);
 
-	int count = (int)((sector_end - sector_start)/4096) + 1;
+	int count = (int)((sector_end - sector_start)/SECTOR_SIZE) + 1;
 	uint32_t* new_buf = (uint32_t*)realloc(*sectors_erases, count*sizeof(uint32_t));
 	uint32_t* new_buf_bytes = (uint32_t*)realloc(*bytes_per_sectors, count*sizeof(uint32_t));
 
@@ -84,9 +84,9 @@ static inline int erase_range(uint32_t addr, size_t len, uint32_t** sectors_eras
 	uint32_t offset_in_sector = addr - sector_start;
 	int k = 0;
 
-	for(uint32_t s = sector_start; s <= sector_end; s += 4096){
+	for(uint32_t s = sector_start; s <= sector_end; s += SECTOR_SIZE){
 
-		size_t spase_here = 4096 - offset_in_sector;
+		size_t spase_here = SECTOR_SIZE - offset_in_sector;
 		size_t take = (rem < spase_here) ? rem : spase_here;
 		sector_erase(s);
 		new_buf[k] = s;
@@ -105,40 +105,40 @@ static inline int erase_range(uint32_t addr, size_t len, uint32_t** sectors_eras
 
 static inline void inc_note_sectors(uint32_t* addrs, uint32_t* lens, int mode, size_t len, int count_sectors_erases){
 
-	uint32_t buff_gen[4];
-	for(int i = 0; i < 4; i++){
+	uint32_t buff_gen[WL_TABLE_SLOTS];
+	for(int i = 0; i < WL_TABLE_SLOTS; i++){
 		buff_gen[i] = read_uint32(tables[i]);
 	}
 
 	uint32_t max_gen = 0;
 	uint32_t index_max_gen = 0;
-	for(int i = 0; i < 4; i++){
+	for(int i = 0; i < WL_TABLE_SLOTS; i++){
 		if(max_gen < buff_gen[i]) { max_gen = buff_gen[i]; index_max_gen = i; }
 	}
 
-	uint32_t *buff = (uint32_t*)malloc(2048*4);
-	for(int i = 0; i < 2048; i++){
-		buff[i] = read_uint32(tables[index_max_gen] + 0x000004 * i);
+	uint32_t *buff = (uint32_t*)malloc(WL_TABLE_ENTRIES*sizeof(uint32_t));
+	for(int i = 0; i < WL_TABLE_ENTRIES; i++){
+		buff[i] = read_uint32(tables[index_max_gen] + sizeof(uint32_t) * i);
 	}
 
-	uint32_t next_slot = (index_max_gen + 1) % 4;
+	uint32_t next_slot = (index_max_gen + 1) % WL_TABLE_SLOTS;
 
 	for(int j = 0; j < count_sectors_erases; j++){
 		uint32_t addr = addrs[j];
 		uint32_t sector_number = NUMBER_SECTOR(addr);
 		if(mode == 0){
-			buff[sector_number * 2] = lens[j];
-			buff[sector_number * 2 + 1] += 1;
+			buff[sector_number * WL_ENTRIES_PER_SECTOR] = lens[j];
+			buff[sector_number * WL_ENTRIES_PER_SECTOR + 1] += 1;
 		}
 		else{
-			buff[sector_number * 2] += (uint32_t)len;
+			buff[sector_number * WL_ENTRIES_PER_SECTOR] += (uint32_t)len;
 		}
 	}
 
-	for(int i = 0; i < 2; i++){ sector_erase(tables[next_slot] + 4096*i); wait_busy(); }
+	for(int i = 0; i < WL_TABLE_SECTORS_PER_SLOT; i++){ sector_erase(tables[next_slot] + SECTOR_SIZE*i); wait_busy(); }
 
 	raw_write_uint32(tables[next_slot], buff[0] + 1);
-	for(int i = 1; i < 2048; i++) { raw_write_uint32(tables[next_slot] + 0x000004 * i, buff[i]); }
+	for(int i = 1; i < WL_TABLE_ENTRIES; i++) { raw_write_uint32(tables[next_slot] + sizeof(uint32_t) * i, buff[i]); }
 	wait_busy();
 
 	free(buff);
@@ -146,7 +146,7 @@ static inline void inc_note_sectors(uint32_t* addrs, uint32_t* lens, int mode, s
 
 static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead_sectors) //запись в самую "свежую" ячейку
 {
-	uint32_t buff_gen[4];
+	uint32_t buff_gen[WL_TABLE_SLOTS];
 	uint32_t addr_sector;
 	size_t writt = 0;
 	uint32_t max_gen = 0, index_max_gen = 0;
@@ -155,24 +155,24 @@ static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead
 
 	extent_list_t _exts = {0}; 
 
-	for(int i = 0; i < 4; i++){
+	for(int i = 0; i < WL_TABLE_SLOTS; i++){
 		buff_gen[i] = read_uint32(tables[i]);
 	}
 
-	for(int i = 0; i < 4; i++){
+	for(int i = 0; i < WL_TABLE_SLOTS; i++){
 		if(max_gen < buff_gen[i]) { max_gen = buff_gen[i]; index_max_gen = i; }
 	}
 
-	uint32_t *buff = (uint32_t*)malloc(2048*4);	//выгрузка свежей таблицы
-	for(int i = 0; i < 2048; i++){
-		buff[i] = read_uint32(tables[index_max_gen] + 0x000004 * i);
+	uint32_t *buff = (uint32_t*)malloc(WL_TABLE_ENTRIES*sizeof(uint32_t));	//выгрузка свежей таблицы
+	for(int i = 0; i < WL_TABLE_ENTRIES; i++){
+		buff[i] = read_uint32(tables[index_max_gen] + sizeof(uint32_t) * i);
 	}
 
-	for(int i = DATA_START_SECTOR*2; i < 2048; i += 2){
-		if(4096 - buff[i] >= len){
+	for(int i = DATA_START_SECTOR*WL_ENTRIES_PER_SECTOR; i < WL_TABLE_ENTRIES; i += WL_ENTRIES_PER_SECTOR){
+		if(SECTOR_SIZE - buff[i] >= len){
 			flag = 1; //найден сектор, в который можно дозаписать данные
 			if(buff[i+1] < min_sector){
-				if(dead_sectors[i / 2] == 0){
+				if(dead_sectors[i / WL_ENTRIES_PER_SECTOR] == 0){
 					min_sector = buff[i+1];
 					idx_min_sector = i;
 					min_sector_with_free_data = buff[i];
@@ -182,16 +182,16 @@ static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead
 	}
 
 	if(flag == 0){
-		if(len <= 4096){
+		if(len <= SECTOR_SIZE){
 			uint32_t* sectors_erases = NULL;
 			uint32_t* bytes_per_sectors = NULL;
 
 			extent_t *exts = (extent_t*)malloc(MAX_EXTENTS * sizeof(extent_t));
 
-			for(int i = DATA_START_SECTOR*2; i < 2048; i += 2){
+			for(int i = DATA_START_SECTOR*WL_ENTRIES_PER_SECTOR; i < WL_TABLE_ENTRIES; i += WL_ENTRIES_PER_SECTOR){
 				uint32_t count = buff[i+1];
 				if(count < min_sector){
-					if(dead_sectors[i / 2] == 0){
+					if(dead_sectors[i / WL_ENTRIES_PER_SECTOR] == 0){
 						min_sector = count;
 						idx_min_sector = i;
 					}
@@ -199,7 +199,7 @@ static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead
 				}
 			}
 
-			addr_sector = (idx_min_sector/2) << 12;
+			addr_sector = (idx_min_sector/WL_ENTRIES_PER_SECTOR) * SECTOR_SIZE;
 			exts[0].addr = addr_sector;
 			exts[0].len  = (uint32_t)len;
 
@@ -209,8 +209,8 @@ static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead
 			int count = erase_range(addr_sector, len, &sectors_erases, &bytes_per_sectors);
 
 			while(writt < len){
-				uint32_t page_offset = (addr_sector + writt) % 256;
-				size_t chunk = 256 - page_offset;
+				uint32_t page_offset = (addr_sector + writt) % PAGE_SIZE;
+				size_t chunk = PAGE_SIZE - page_offset;
 				if(chunk > (len - writt)) chunk = len - writt;
 
 				page_program(addr_sector + writt, data + writt, chunk);
@@ -222,7 +222,7 @@ static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead
 			free(bytes_per_sectors);
 		}
 		else{
-			size_t sectors_needed = (len + 4095) / 4096;
+			size_t sectors_needed = (len + SECTOR_SIZE - 1) / SECTOR_SIZE;
 
 			extent_t *exts = (extent_t*)malloc(MAX_EXTENTS * sizeof(extent_t));
 			int ext_count;
@@ -235,7 +235,7 @@ static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead
 
 			size_t data_off = 0;
 			for(int e = 0; e < ext_count; e++){
-				size_t chunk_len = (size_t)exts[e].len * 4096;
+				size_t chunk_len = (size_t)exts[e].len * SECTOR_SIZE;
 				if(chunk_len > len - data_off) chunk_len = len - data_off;
 
 				uint32_t* sectors_erases = NULL;
@@ -246,8 +246,8 @@ static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead
 
 				
 				while(writt_local < chunk_len){
-					uint32_t page_offset = (exts[e].addr + writt_local) % 256;
-					size_t chunk = 256 - page_offset;
+					uint32_t page_offset = (exts[e].addr + writt_local) % PAGE_SIZE;
+					size_t chunk = PAGE_SIZE - page_offset;
 					if(chunk > chunk_len - writt_local) chunk = chunk_len - writt_local;
 
 					page_program(exts[e].addr + writt_local, data + data_off + writt_local, chunk);
@@ -267,7 +267,7 @@ static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead
 		}
 	}
 	else{
-		addr_sector = ((idx_min_sector/2) << 12) + min_sector_with_free_data;
+		addr_sector = ((idx_min_sector/WL_ENTRIES_PER_SECTOR) * SECTOR_SIZE) + min_sector_with_free_data;
 
 		extent_t *exts = (extent_t*)malloc(MAX_EXTENTS * sizeof(extent_t));
 
@@ -278,15 +278,15 @@ static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead
 		_exts.count = 1; 
 
 		while(writt < len){
-			uint32_t page_offset = (addr_sector + writt) % 256;
-			size_t chunk = 256 - page_offset;
+			uint32_t page_offset = (addr_sector + writt) % PAGE_SIZE;
+			size_t chunk = PAGE_SIZE - page_offset;
 			if(chunk > (len - writt)) chunk = len - writt;
 
 			page_program(addr_sector + writt, data + writt, chunk);
 			writt += chunk;
 		}
 
-		uint32_t single_addr = idx_min_sector/2 << 12;
+		uint32_t single_addr = (idx_min_sector/WL_ENTRIES_PER_SECTOR) * SECTOR_SIZE;
 		inc_note_sectors(&single_addr, NULL, MODE_APPENDED, len, 1);
 	}
 

@@ -23,21 +23,23 @@ static inline void read_extents(extent_list_t *ext, uint8_t* buf, size_t total_l
 static inline void create_tables_wear_levering(){
 
 
-	uint32_t buff_table1[2048];
+	uint32_t buff_table1[WL_TABLE_ENTRIES];
 	init_perez(buff_table1);
 
 
-	for(int i = 0; i < 4; i++){
-		sector_erase(tables[i]); wait_busy();
-		sector_erase(tables[i] + 4096); wait_busy();
-		for(int j = 0; j < 2048; j++){
-			raw_write_uint32(tables[i] + j * 0x000004, buff_table1[j]);
+	for(int i = 0; i < WL_TABLE_SLOTS; i++){
+		for(int s = 0; s < WL_TABLE_SECTORS_PER_SLOT; s++){
+			sector_erase(tables[i] + s * SECTOR_SIZE);
+			wait_busy();
+		}
+		for(int j = 0; j < WL_TABLE_ENTRIES; j++){
+			raw_write_uint32(tables[i] + j * sizeof(uint32_t), buff_table1[j]);
 		}
 	}
 
-	for(int j = 0; j < 4; j++){
-		for(int i = 0; i < 2048; i++) {
-			buff_table[j][i] = read_uint32(tables[j] + 0x000004 * i);
+	for(int j = 0; j < WL_TABLE_SLOTS; j++){
+		for(int i = 0; i < WL_TABLE_ENTRIES; i++) {
+			buff_table[j][i] = read_uint32(tables[j] + sizeof(uint32_t) * i);
 		}
 		wait_busy();
 	}
@@ -48,11 +50,11 @@ static inline void create_inodes_table(){
     file_inode_t empty_table[MAX_FILES];
     memset(empty_table, 0, sizeof(empty_table)); // все flags = 0, все поля обнулены
 
-    for(int slot = 0; slot < 4; slot++){
+    for(int slot = 0; slot < INODE_TABLE_SLOTS; slot++){
         uint32_t base = inodes[slot];
 
         for(int i = 0; i < INODE_TABLE_TOTAL_SECTORS; i++){
-            sector_erase(base + i * 4096);
+            sector_erase(base + i * SECTOR_SIZE);
             wait_busy();
         }
 
@@ -63,8 +65,8 @@ static inline void create_inodes_table(){
         size_t written = 0;
         while(written < total){
             uint32_t addr = base + INODE_TABLE_HEADER_BYTES + written;//резервируем сектор под что-то
-            uint32_t page_offset = addr % 256;
-            size_t chunk = 256 - page_offset;
+            uint32_t page_offset = addr % PAGE_SIZE;
+            size_t chunk = PAGE_SIZE - page_offset;
             if(chunk > total - written) chunk = total - written;
 
             page_program(addr, raw + written, chunk);
@@ -75,28 +77,23 @@ static inline void create_inodes_table(){
 }
 
 static inline void write_inode_table(file_inode_t *table){
-	uint32_t buff_gen[4];
-	for(int i = 0; i < 4; i++){
+	uint32_t buff_gen[INODE_TABLE_SLOTS];
+	for(int i = 0; i < INODE_TABLE_SLOTS; i++){
 		buff_gen[i] = read_uint32(inodes[i]);
 	}
 
 	uint32_t max_gen = 0;
 	uint32_t index_max_gen = 0;
-	for(int i = 0; i < 4; i++){
+	for(int i = 0; i < INODE_TABLE_SLOTS; i++){
 		if(max_gen < buff_gen[i]) { max_gen = buff_gen[i]; index_max_gen = i; }
 	}
 
-	uint32_t *buff = (uint32_t*)malloc(2048*4);
-	for(int i = 0; i < 2048; i++){
-		buff[i] = read_uint32(inodes[index_max_gen] + 0x000004 * i);
-	}
-
-	uint32_t next_slot = (index_max_gen + 1) % 4;
+	uint32_t next_slot = (index_max_gen + 1) % INODE_TABLE_SLOTS;
 
 	uint32_t base = inodes[next_slot];
 
 	for(int i = 0; i < INODE_TABLE_TOTAL_SECTORS; i++){
-		sector_erase(base + i * 4096);
+		sector_erase(base + i * SECTOR_SIZE);
 	}
 
 	raw_write_uint32(base, max_gen + 1);
@@ -106,8 +103,8 @@ static inline void write_inode_table(file_inode_t *table){
 	size_t written = 0;
 	while(written < total){
 		uint32_t addr = base + INODE_TABLE_HEADER_BYTES + written;
-		uint32_t page_offset = addr%256;
-		size_t chunk = 256 - page_offset;
+		uint32_t page_offset = addr % PAGE_SIZE;
+		size_t chunk = PAGE_SIZE - page_offset;
 
 		if(chunk > total - written) { chunk = total - written; }
 
@@ -121,28 +118,21 @@ static inline void write_inode_table(file_inode_t *table){
 
 static inline void read_inode_table(file_inode_t *out_table){
 
-    uint32_t buff_gen[4];
-    for(int i = 0; i < 4; i++){
+    uint32_t buff_gen[INODE_TABLE_SLOTS];
+    for(int i = 0; i < INODE_TABLE_SLOTS; i++){
         buff_gen[i] = read_uint32(inodes[i]);
     }
 
     uint32_t max_gen = 0, index_max_gen = 0;
-    for(int i = 0; i < 4; i++){
+    for(int i = 0; i < INODE_TABLE_SLOTS; i++){
         if(max_gen < buff_gen[i]) { max_gen = buff_gen[i]; index_max_gen = i; }
     }
 
     uint32_t base = inodes[index_max_gen] + INODE_TABLE_HEADER_BYTES;
     uint8_t *raw = (uint8_t*)out_table;
     size_t total = INODE_TABLE_DATA_BYTES;
-    size_t rd = 0;
 
-    while(rd < total){
-        size_t chunk = 256;
-        if(chunk > total - rd) chunk = total - rd;
-
-        read_data_chunked(base + rd, raw + rd, chunk);
-        rd += chunk;
-    }
+    read_data_chunked(base, raw, total);
 }
 
 static inline int write_file(char *file_name, uint8_t *data, size_t len){
@@ -223,7 +213,7 @@ static inline int garbage_collection(){
 	file_inode_t table_inode[MAX_FILES];
 	read_inode_table(table_inode);
 
-	uint32_t alives_bytes[2048] = {0};
+	uint32_t alives_bytes[FLASH_TOTAL_SECTORS] = {0};
 
 
 
@@ -237,29 +227,32 @@ static inline int garbage_collection(){
 	}
 
 
-	uint32_t wl_table[4][2048];
-	for(int k = 0; k < 4; k ++){
-		for(int i = 0; i < 2048; i++){
-			wl_table[k][i] = read_uint32(tables[k] + 4*i);
+	uint32_t wl_table[WL_TABLE_SLOTS][WL_TABLE_ENTRIES];
+	for(int k = 0; k < WL_TABLE_SLOTS; k ++){
+		for(int i = 0; i < WL_TABLE_ENTRIES; i++){
+			wl_table[k][i] = read_uint32(tables[k] + sizeof(uint32_t)*i);
 		}
 	}
 
 	uint32_t max_gen = 0;
 	uint32_t index_max_gen = 0;
-	for(int i = 0; i < 4; i++){
+	for(int i = 0; i < WL_TABLE_SLOTS; i++){
 		if(max_gen < wl_table[i][0]) { max_gen = wl_table[i][0]; index_max_gen = i; }
 	}
 
 
 
-	for(int i = DATA_START_SECTOR; i < 1024; i++){
-		uint32_t total_writt = wl_table[index_max_gen][i * 2];
+	/* Раньше было "i < 1024" — вдвое меньше реальной ёмкости чипа (2048
+	   секторов), поэтому вторая половина флеша никогда не проверялась
+	   на "мусор" и не освобождалась. */
+	for(int i = DATA_START_SECTOR; i < FLASH_TOTAL_SECTORS; i++){
+		uint32_t total_writt = wl_table[index_max_gen][i * WL_ENTRIES_PER_SECTOR];
 
 		if(total_writt > 0){
 
 			uint32_t dead_bytes = total_writt - alives_bytes[i];
 
-			float dead_sector_proc = dead_bytes/4096.0;
+			float dead_sector_proc = dead_bytes/(float)SECTOR_SIZE;
 			if(dead_sector_proc >= 0.90f){
 				dead_sectors[i] = 1;
 			}
@@ -301,10 +294,11 @@ static inline int garbage_collection(){
 
 	write_inode_table(table_inode);
 
-	for(int s = DATA_START_SECTOR; s < 1024; s++){
+	/* Тот же fix: раньше было "s < 1024". */
+	for(int s = DATA_START_SECTOR; s < FLASH_TOTAL_SECTORS; s++){
 		if(dead_sectors[s] == 1) {
 			
-			uint32_t erased_addr = s * 4096;
+			uint32_t erased_addr = s * SECTOR_SIZE;
 			sector_erase(erased_addr);
 			
 			uint32_t zero_bytes = 0;
