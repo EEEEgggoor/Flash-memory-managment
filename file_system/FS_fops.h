@@ -22,26 +22,12 @@ static inline void read_extents(extent_list_t *ext, uint8_t* buf, size_t total_l
 
 static inline void create_tables_wear_levering(){
 
-
 	uint32_t buff_table1[WL_TABLE_ENTRIES];
 	init_perez(buff_table1);
 
-
 	for(int i = 0; i < WL_TABLE_SLOTS; i++){
-		for(int s = 0; s < WL_TABLE_SECTORS_PER_SLOT; s++){
-			sector_erase(tables[i] + s * SECTOR_SIZE);
-			wait_busy();
-		}
-		for(int j = 0; j < WL_TABLE_ENTRIES; j++){
-			raw_write_uint32(tables[i] + j * sizeof(uint32_t), buff_table1[j]);
-		}
-	}
-
-	for(int j = 0; j < WL_TABLE_SLOTS; j++){
-		for(int i = 0; i < WL_TABLE_ENTRIES; i++) {
-			buff_table[j][i] = read_uint32(tables[j] + sizeof(uint32_t) * i);
-		}
-		wait_busy();
+		write_wl_slot(i, buff_table1);
+		memcpy(buff_table[i], buff_table1, WL_TABLE_BYTES);
 	}
 }
 
@@ -201,7 +187,6 @@ static inline int delete_file(char* file_name){
 			table_inode[i].flags = 5;
 			write_inode_table(table_inode);
 			return 0; 
-			garbage_collection();
 		}
 	}
 
@@ -220,43 +205,35 @@ static inline int garbage_collection(){
 	for(int i = 0; i < MAX_FILES; i++){
 		if(table_inode[i].flags == 1){
 			for(int j = 0; j < table_inode[i].ext_count; j++){
-				uint32_t sector_num = NUMBER_SECTOR(table_inode[i].extents[j].addr);
-				alives_bytes[sector_num] += table_inode[i].extents[j].len; //подсчет, сколько живих байт в секторе
+				uint32_t addr = table_inode[i].extents[j].addr;
+				uint32_t rem = table_inode[i].extents[j].len;
+				while(rem > 0){
+					uint32_t sector_num = NUMBER_SECTOR(addr);
+					uint32_t offset = addr % SECTOR_SIZE;
+					uint32_t take = (rem < SECTOR_SIZE - offset) ? rem : (SECTOR_SIZE - offset);
+
+					alives_bytes[sector_num] += take;
+					addr += take;
+					rem -= take;
+				}
 			}
 		}
 	}
 
 
-	uint32_t wl_table[WL_TABLE_SLOTS][WL_TABLE_ENTRIES];
-	for(int k = 0; k < WL_TABLE_SLOTS; k ++){
-		for(int i = 0; i < WL_TABLE_ENTRIES; i++){
-			wl_table[k][i] = read_uint32(tables[k] + sizeof(uint32_t)*i);
-		}
-	}
+	uint32_t current_wl[WL_TABLE_ENTRIES];
+	read_wl_table(current_wl, NULL);
 
-	uint32_t max_gen = 0;
-	uint32_t index_max_gen = 0;
-	for(int i = 0; i < WL_TABLE_SLOTS; i++){
-		if(max_gen < wl_table[i][0]) { max_gen = wl_table[i][0]; index_max_gen = i; }
-	}
+	for (int i = DATA_START_SECTOR; i < FLASH_TOTAL_SECTORS; i++) {
+		uint32_t total_writt = current_wl[i * WL_ENTRIES_PER_SECTOR];
 
+		if (total_writt > 0) {
+			uint32_t dead_bytes = (total_writt > alives_bytes[i]) ? (total_writt - alives_bytes[i]) : 0;
 
-
-	/* Раньше было "i < 1024" — вдвое меньше реальной ёмкости чипа (2048
-	   секторов), поэтому вторая половина флеша никогда не проверялась
-	   на "мусор" и не освобождалась. */
-	for(int i = DATA_START_SECTOR; i < FLASH_TOTAL_SECTORS; i++){
-		uint32_t total_writt = wl_table[index_max_gen][i * WL_ENTRIES_PER_SECTOR];
-
-		if(total_writt > 0){
-
-			uint32_t dead_bytes = total_writt - alives_bytes[i];
-
-			float dead_sector_proc = dead_bytes/(float)SECTOR_SIZE;
-			if(dead_sector_proc >= 0.90f){
+			float dead_sector_proc = dead_bytes / (float)SECTOR_SIZE;
+			if (dead_sector_proc >= 0.90f) {
 				dead_sectors[i] = 1;
-			}
-			else{
+			} else {
 				dead_sectors[i] = 0;
 			}
 		}
@@ -267,34 +244,42 @@ static inline int garbage_collection(){
 		if(table_inode[i].flags == 1){
 
 			int needs_moving = 0;
-			for(int j = 0; j < table_inode[i].ext_count; j++){
-				uint32_t sec = NUMBER_SECTOR(table_inode[i].extents[j].addr);
-				if(dead_sectors[sec] == 1){
-					needs_moving = 1;
+			for (int j = 0; j < table_inode[i].ext_count && !needs_moving; j++) {
+				uint32_t addr = table_inode[i].extents[j].addr;
+				uint32_t len  = table_inode[i].extents[j].len;
+				if (len == 0) continue;
+
+				uint32_t first_sec = NUMBER_SECTOR(addr);
+				uint32_t last_sec  = NUMBER_SECTOR(addr + len - 1);
+
+				for (uint32_t sec = first_sec; sec <= last_sec; sec++) {
+					if (dead_sectors[sec] == 1) {
+						needs_moving = 1;
+						break;
+					}
 				}
 			}
 
-			if (needs_moving){
+			if (needs_moving) {
 				uint8_t *data_buf = (uint8_t*)malloc(table_inode[i].size);
 				if (!data_buf) continue;
 
 				read_file(table_inode[i].name, data_buf, table_inode[i].size);
 				extent_list_t ext = write_data(data_buf, table_inode[i].size, dead_sectors);
 
-				table_inode[i].ext_count = ext.count;
-				memcpy(table_inode[i].extents, ext.extents, ext.count * sizeof(extent_t));
+				if (ext.extents != NULL && ext.count > 0) {
+					table_inode[i].ext_count = ext.count;
+					memcpy(table_inode[i].extents, ext.extents, ext.count * sizeof(extent_t));
+					free(ext.extents);
+				}
 
-				free(ext.extents);
-				free(data_buf);  
+				free(data_buf);
 			}
-
-
 		}
 	}
 
 	write_inode_table(table_inode);
 
-	/* Тот же fix: раньше было "s < 1024". */
 	for(int s = DATA_START_SECTOR; s < FLASH_TOTAL_SECTORS; s++){
 		if(dead_sectors[s] == 1) {
 			

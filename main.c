@@ -174,7 +174,7 @@ int main(int argc, char *argv[]){
 		run_fs_tests();
 	}
 
-	// Загрузить из системы на флешку (Пример: ./main --import my_image.jpg)
+	// Загрузить из системы на флешку (Пример: ./main --import my_image.jpg) 
     if(!strcmp(argv[1], "--import")){
 
         import_from_linux(argv[2]);

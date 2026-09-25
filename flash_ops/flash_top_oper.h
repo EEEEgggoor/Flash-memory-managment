@@ -105,21 +105,11 @@ static inline int erase_range(uint32_t addr, size_t len, uint32_t** sectors_eras
 
 static inline void inc_note_sectors(uint32_t* addrs, uint32_t* lens, int mode, size_t len, int count_sectors_erases){
 
-	uint32_t buff_gen[WL_TABLE_SLOTS];
-	for(int i = 0; i < WL_TABLE_SLOTS; i++){
-		buff_gen[i] = read_uint32(tables[i]);
-	}
-
-	uint32_t max_gen = 0;
 	uint32_t index_max_gen = 0;
-	for(int i = 0; i < WL_TABLE_SLOTS; i++){
-		if(max_gen < buff_gen[i]) { max_gen = buff_gen[i]; index_max_gen = i; }
-	}
+	uint32_t *buff = (uint32_t*)malloc(WL_TABLE_BYTES);
+	if (!buff) return;
 
-	uint32_t *buff = (uint32_t*)malloc(WL_TABLE_ENTRIES*sizeof(uint32_t));
-	for(int i = 0; i < WL_TABLE_ENTRIES; i++){
-		buff[i] = read_uint32(tables[index_max_gen] + sizeof(uint32_t) * i);
-	}
+	read_wl_table(buff, &index_max_gen);
 
 	uint32_t next_slot = (index_max_gen + 1) % WL_TABLE_SLOTS;
 
@@ -135,38 +125,26 @@ static inline void inc_note_sectors(uint32_t* addrs, uint32_t* lens, int mode, s
 		}
 	}
 
-	for(int i = 0; i < WL_TABLE_SECTORS_PER_SLOT; i++){ sector_erase(tables[next_slot] + SECTOR_SIZE*i); wait_busy(); }
+	buff[0] += 1; 
 
-	raw_write_uint32(tables[next_slot], buff[0] + 1);
-	for(int i = 1; i < WL_TABLE_ENTRIES; i++) { raw_write_uint32(tables[next_slot] + sizeof(uint32_t) * i, buff[i]); }
-	wait_busy();
+	write_wl_slot(next_slot, buff);
 
 	free(buff);
 }
 
 static inline extent_list_t write_data(uint8_t *data, size_t len, uint32_t* dead_sectors) //запись в самую "свежую" ячейку
 {
-	uint32_t buff_gen[WL_TABLE_SLOTS];
 	uint32_t addr_sector;
 	size_t writt = 0;
-	uint32_t max_gen = 0, index_max_gen = 0;
 	uint32_t min_sector = 0xFFFFFFFF, min_sector_with_free_data = 0 /* <- переменная, хранящая свободное место у самого "свежего" сектора*/;
 	int idx_min_sector = 0, flag = 0;
 
 	extent_list_t _exts = {0}; 
 
-	for(int i = 0; i < WL_TABLE_SLOTS; i++){
-		buff_gen[i] = read_uint32(tables[i]);
-	}
+	uint32_t *buff = (uint32_t*)malloc(WL_TABLE_BYTES);
+	if (!buff) return (extent_list_t){0};
 
-	for(int i = 0; i < WL_TABLE_SLOTS; i++){
-		if(max_gen < buff_gen[i]) { max_gen = buff_gen[i]; index_max_gen = i; }
-	}
-
-	uint32_t *buff = (uint32_t*)malloc(WL_TABLE_ENTRIES*sizeof(uint32_t));	//выгрузка свежей таблицы
-	for(int i = 0; i < WL_TABLE_ENTRIES; i++){
-		buff[i] = read_uint32(tables[index_max_gen] + sizeof(uint32_t) * i);
-	}
+	read_wl_table(buff, NULL);
 
 	for(int i = DATA_START_SECTOR*WL_ENTRIES_PER_SECTOR; i < WL_TABLE_ENTRIES; i += WL_ENTRIES_PER_SECTOR){
 		if(SECTOR_SIZE - buff[i] >= len){
@@ -303,6 +281,58 @@ static inline void read_data_chunked(uint32_t addr, uint8_t *buf, size_t len){
         read_data(addr + rd, buf + rd, chunk);
         rd += chunk;
     }
+}
+
+
+
+static inline uint32_t read_wl_table(uint32_t *out_buf, uint32_t *out_slot_idx){
+	uint32_t max_gen = 0;
+	uint32_t index_max_gen = 0;
+
+	for(int i = 0; i < WL_TABLE_SLOTS; i++){
+		uint32_t gen = read_uint32(tables[i]);
+		if(max_gen < gen){
+			max_gen = gen;
+			index_max_gen = i;
+		}
+	}
+
+	read_data_chunked(tables[index_max_gen], (uint8_t *)out_buf, WL_TABLE_BYTES);
+	for(int i = 0; i < WL_TABLE_ENTRIES; i++){ out_buf[i] = __builtin_bswap32(out_buf[i]); }
+
+	if(out_slot_idx) { *out_slot_idx = index_max_gen; }
+
+	return max_gen;
+}
+
+static inline void write_wl_slot(uint32_t slot_idx, const uint32_t *buff) {
+    uint32_t base = tables[slot_idx];
+
+    for (int i = 0; i < WL_TABLE_SECTORS_PER_SLOT; i++) {
+        sector_erase(base + SECTOR_SIZE * i);
+    }
+
+    uint32_t *be_buff = (uint32_t*)malloc(WL_TABLE_BYTES);
+    if (!be_buff) return;
+    for (int i = 0; i < WL_TABLE_ENTRIES; i++) {
+        be_buff[i] = __builtin_bswap32(buff[i]);
+    }
+
+    uint8_t *raw = (uint8_t*)be_buff;
+    size_t total = WL_TABLE_BYTES;
+    size_t written = 0;
+
+    while (written < total) {
+        uint32_t addr = base + written;
+        uint32_t page_offset = addr % PAGE_SIZE;
+        size_t chunk = PAGE_SIZE - page_offset;
+        if (chunk > total - written) chunk = total - written;
+
+        page_program(addr, raw + written, chunk);
+        written += chunk;
+    }
+
+    free(be_buff);
 }
 
 #endif

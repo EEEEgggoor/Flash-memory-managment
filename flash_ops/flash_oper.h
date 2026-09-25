@@ -59,11 +59,12 @@ static inline void write_enable(void){
 
 static inline void wait_busy(void){
     int status;
-    do {
+    while (1) {
         status = read_status();
-        if (status < 0) return; /* ошибка чтения — выходим, чтобы не зациклиться */
-        usleep(1000);
-    } while (status & 0x01);
+        if (status < 0 || !(status & 0x01))
+            return;
+        usleep(100);
+    }
 }
 
 static inline int sector_erase(uint32_t addr){

@@ -1,1 +1,11 @@
-test text 1
+A memory management unit (MMU), sometimes called paged memory management unit (PMMU),[1] is a computer hardware unit that examines all references to memory, and translates the memory addresses being referenced, known as virtual memory addresses, into physical addresses in main memory.
+
+In modern systems, programs generally have addresses that access the theoretical maximum memory of the computer architecture, 32 or 64 bits. The MMU maps the addresses from each program into separate areas in physical memory, which is generally much smaller than the theoretical maximum. This is possible because programs rarely use large amounts of memory at any one time.
+
+Most modern operating systems (OS) use an MMU to provide virtual memory (VM) support. The MMU tracks memory use in fixed-size blocks known as pages. If a program refers to a location in a page that is not in physical memory, the MMU sends an interrupt to the operating system. The OS selects a lesser-used block in memory, writes it to backing storage such as a hard drive if it has been modified since it was read in, reads the page from backing storage into that block, and sets up the MMU to map the block to the originally requested page so the program can use it. This is known as demand paging. Some simpler real-time operating systems do not support virtual memory and do not need an MMU, but still need a hardware memory protection unit.
+
+MMUs generally provide memory protection to block attempts by a program to access memory it has not previously requested, which prevents a misbehaving or malicious program from modifying or reading data belonging to another program.
+
+In some early microprocessor designs, memory management was performed by a separate integrated circuit such as the VLSI Technology VI475 (1986), the Motorola 68851 (1984) used with the Motorola 68020 CPU in the Macintosh II, or the Z8010[2] and Z8015 (1985)[3][4] used with the Zilog Z8000 family of processors. Later microprocessors (such as the Motorola 68030 and the Zilog Z280) placed the MMU together with the CPU on the same integrated circuit, as did the Intel 80286 and later x86 microprocessors.
+
+Some early systems, especially 8-bit systems, used very simple MMUs to perform bank switching.
